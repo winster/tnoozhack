@@ -1,0 +1,322 @@
+<html>
+
+  <head>
+
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="title" content="Stand in virtual Queue">
+    <script>
+      var isPushEnabled = false;
+
+      // Once the service worker is registered set the initial state  
+      function initialiseState() {  
+        // Are Notifications supported in the service worker?  
+        if (!('showNotification' in ServiceWorkerRegistration.prototype)) {  
+          console.warn('Notifications aren\'t supported.');  
+          return;  
+        }
+
+        // Check the current Notification permission.  
+        // If its denied, it's a permanent block until the  
+        // user changes the permission  
+        if (Notification.permission === 'denied') {  
+          console.warn('The user has blocked notifications.');  
+          return;  
+        }
+
+        // Check if push messaging is supported  
+        if (!('PushManager' in window)) {  
+          console.warn('Push messaging isn\'t supported.');  
+          return;  
+        }
+
+        // We need the service worker registration to check for a subscription  
+        navigator.serviceWorker.ready.then(function(serviceWorkerRegistration) {  
+          // Do we already have a push message subscription?  
+          serviceWorkerRegistration.pushManager.getSubscription()  
+            .then(function(subscription) {  
+              // Enable any UI which subscribes / unsubscribes from  
+              // push messages.  
+              var pushButton = document.querySelector('.js-push-button');  
+              pushButton.disabled = false;
+
+              if (!subscription) {  
+                // We aren't subscribed to push, so set UI  
+                // to allow the user to enable push  
+                return;  
+              }
+
+              // Keep your server in sync with the latest subscriptionId
+              sendSubscriptionToServer(subscription);
+
+              // Set your UI to show they have subscribed for  
+              // push messages  
+              pushButton.textContent = 'Unsubscribe';  
+              isPushEnabled = true;  
+            })  
+            .catch(function(err) {  
+              console.warn('Error during getSubscription()', err);  
+            });  
+        });  
+      }
+
+      window.addEventListener('load', function() {  
+        var pushButton = document.querySelector('.js-push-button');  
+        var resetButton = document.querySelector('.reset-button');  
+        pushButton.addEventListener('click', function() {  
+          if (isPushEnabled) {  
+            unsubscribe();  
+          } else {  
+            subscribe();  
+          }  
+        });
+        resetButton.addEventListener('click', function() {  
+          unsubscribe();
+        });
+
+        // Check that service workers are supported, if so, progressively  
+        // enhance and add push messaging support, otherwise continue without it.  
+        if ('serviceWorker' in navigator) {  
+          navigator.serviceWorker.register('/service-worker.js')  
+          .then(initialiseState);  
+        } else {  
+          console.warn('Service workers aren\'t supported in this browser.');  
+        }  
+
+        var host = location.origin.replace(/^http/, 'ws')
+        var ws = new WebSocket(host);
+        ws.onmessage = function (event) {
+          var result = JSON.parse(event.data);
+          console.log(result)
+          if(result.rank) {
+            document.querySelector('#queuerank').textContent=result.rank;
+            document.querySelector('#queuetime').textContent=result.time;
+            if(result.rank<3)
+              hidePromo();
+            else
+              showPromo();
+          }
+          if(result.promo) {
+            result.promo.map(function(promo){
+              console.log(promo.url); 
+              var parentul;
+              if(promo.type==='child') 
+                parentul = document.querySelector('#childpromo');
+              if(promo.type==='discount') 
+                parentul = document.querySelector('#discountpromo');
+              
+              var childli=document.createElement("li");
+              var childimage=document.createElement("img");
+              var childtitle=document.createElement("span");
+              childtitle.textContent = promo.title;
+              childimage.src=promo.url;
+              childli.appendChild(childtitle);
+              childli.appendChild(childimage);
+              parentul.appendChild(childli);
+              document.querySelector('.promo').classList.remove('hidden');
+            });
+          }
+        };
+
+        if(getQueryVariable('rank')<3)
+          hidePromo();
+
+      });
+
+      function getQueryVariable(variable) {
+        var query = window.location.search.substring(1);
+        var vars = query.split("&");
+        for (var i=0;i<vars.length;i++) {
+          var pair = vars[i].split("=");
+          if (pair[0] == variable) {
+            return pair[1];
+          }
+        } 
+      }
+
+      function subscribe() {  
+        // Disable the button so it can't be changed while  
+        // we process the permission request  
+        var pushButton = document.querySelector('.js-push-button');  
+        pushButton.disabled = true;
+
+        navigator.serviceWorker.ready.then(function(serviceWorkerRegistration) {  
+          serviceWorkerRegistration.pushManager.subscribe({userVisibleOnly:true})  
+            .then(function(subscription) {  
+              // The subscription was successful  
+              isPushEnabled = true;  
+              pushButton.textContent = 'Unsubscribe';  
+              pushButton.disabled = false;
+
+              // TODO: Send the subscription.endpoint to your server  
+              // and save it to send a push message at a later date
+              return sendSubscriptionToServer(subscription);  
+            })  
+            .catch(function(e) {  
+              if (Notification.permission === 'denied') {  
+                // The user denied the notification permission which  
+                // means we failed to subscribe and the user will need  
+                // to manually change the notification permission to  
+                // subscribe to push messages  
+                console.warn('Permission for Notifications was denied');  
+                pushButton.disabled = true;  
+              } else {  
+                // A problem occurred with the subscription; common reasons  
+                // include network errors, and lacking gcm_sender_id and/or  
+                // gcm_user_visible_only in the manifest.  
+                console.error('Unable to subscribe to push.', e);  
+                pushButton.disabled = false;  
+                pushButton.textContent = 'Register';  
+              }  
+            });  
+        });  
+      }
+
+      function unsubscribe() {  
+        var pushButton = document.querySelector('.js-push-button');  
+        pushButton.disabled = true;
+
+        navigator.serviceWorker.ready.then(function(serviceWorkerRegistration) {  
+          // To unsubscribe from push messaging, you need get the  
+          // subscription object, which you can call unsubscribe() on.  
+          serviceWorkerRegistration.pushManager.getSubscription().then(  
+            function(pushSubscription) {  
+              // Check we have a subscription to unsubscribe  
+              if (!pushSubscription) {  
+                // No subscription object, so set the state  
+                // to allow the user to subscribe to push  
+                isPushEnabled = false;  
+                pushButton.disabled = false;  
+                pushButton.textContent = 'Register';  
+                return;  
+              }  
+
+              var subscriptionId = pushSubscription.subscriptionId;  
+              // TODO: Make a request to your server to remove  
+              // the subscriptionId from your data store so you
+              // don't attempt to send them push messages anymore
+
+              // We have a subscription, so call unsubscribe on it  
+              pushSubscription.unsubscribe().then(function(successful) {  
+                pushButton.disabled = false;  
+                pushButton.textContent = 'Register';  
+                isPushEnabled = false;  
+
+                return sendUnsubscriptionToServer(pushSubscription);  
+
+              }).catch(function(e) {  
+                // We failed to unsubscribe, this can lead to  
+                // an unusual state, so may be best to remove
+                // the users data from your data store and
+                // inform the user that you have done so
+
+                console.log('Unsubscription error: ', e);  
+                pushButton.disabled = false;
+                pushButton.textContent = 'Register';
+              });  
+            }).catch(function(e) {  
+              console.error('Error thrown while unsubscribing from push messaging.', e);  
+            });  
+        });  
+      }
+
+      function sendSubscriptionToServer(subscription){
+        console.log(subscription);
+        subscription.lname=document.querySelector("#lname").value;
+        subscription.recloc=document.querySelector("#recloc").value;
+        httprequest("/register", JSON.stringify(subscription), true);
+      }
+
+      function sendUnsubscriptionToServer(pushSubscription){
+        console.log(pushSubscription);
+        httprequest("/unregister", JSON.stringify(pushSubscription), false);
+      }
+
+      function httprequest(url, params, showqueue){
+        var http = new XMLHttpRequest();
+        http.open("POST", url, true);
+
+        //Send the proper header information along with the request
+        http.setRequestHeader("Content-Type", "application/json");
+        //http.setRequestHeader("Content-length", params.length);
+        //http.setRequestHeader("Connection", "close");
+
+        http.onreadystatechange = function() {//Call a function when the state changes.
+            if(http.readyState == 4 && http.status == 200) {
+                //alert(http.responseText);
+                var resultjson = JSON.parse(http.responseText);
+                if(showqueue) {
+                  document.querySelector('#queuerank').textContent=resultjson.result.rank;
+                  document.querySelector('#queuetime').textContent=resultjson.result.time;
+                  showQueue();
+                } else{
+                  showRegister();
+                }
+            }
+        }
+        http.send(params);
+      }
+
+      function showQueue(){
+        document.querySelector('.register').classList.add('hidden');
+        document.querySelector('.queue').classList.remove('hidden');                
+      }
+
+      function showRegister(){
+        document.querySelector('.register').classList.remove('hidden');
+        document.querySelector('.queue').classList.add('hidden'); 
+        document.querySelector('.promo').classList.add('hidden');                
+      }
+
+      function hidePromo() {        
+        document.querySelector('.promo').classList.add('hidden');     
+      }
+
+      function showPromo() {        
+        document.querySelector('.promo').classList.remove('hidden');     
+      }
+
+</script>
+  <title>Airport Queue Management System</title>
+
+  <link rel="manifest" href="/manifest.json">
+  <link rel="stylesheet" href="css/bootstrap.min.css">
+  <link rel="stylesheet" href="css/main.css">
+
+</head>
+
+<body>
+
+  <div class="container">
+    <h1 >Airport QMS</h1>
+    <button class="btn btn-warning reset-button pull-right" type="button">Reset</button>
+    <br>
+    <hr>
+    <div class="register">
+      <div class="form-group">
+          <input type="text" id="lname" class="form-control" placeholder="Enter your last name" value="WINSTER"></input>
+      </div>
+      <div class="form-group">
+          <input type="text" id="recloc" class="form-control" placeholder="Enter your PNR" value="23JVHZ"></input>
+      </div>
+      <div class="row">  
+        <div class="span4 offset4 text-center">
+          <button class="btn btn-large btn-success js-push-button" type="button" disabled>Register</button>
+        </div>
+      </div>
+    </div>
+    <div class="queue hidden">
+      <h1><span id="queuerank"></span> to go</h1>
+      <h2><span id="queuetime"></span> minutes left</h2>
+    </div>
+    <div class="promo hidden">
+      <h3>Meanwhile check what we have found for your baby!</h3>
+      <ul id="childpromo">
+      </ul>
+      <h3>Great discounts at our showrooms</h3>
+      <ul id="discountpromo">
+      </ul>
+    </div>
+  </div>
+</body>
+
+</html>
