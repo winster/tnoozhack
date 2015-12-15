@@ -152,9 +152,10 @@ app.get('/retrieve', function(request, response) {
   response.send('calling');
 });
 
+var AMADEUS_API = 'XXXXXXYYYYYY'; //get it from amadeus sandbox portal
 var retrieveTrip = function(lname, recloc) {
   var trip='';
-  https.get('https://api.sandbox.amadeus.com/v1.2/travel-record/23JVHZ?apikey=HU8LIrcTv0MUluavViSe5AAYTdAsfDFG&last_name=WINSTER&env=TEST',
+  https.get('https://api.sandbox.amadeus.com/v1.2/travel-record/23JVHZ?apikey='+AMADEUS_API+'&last_name=WINSTER&env=TEST',
        function(res){
           //console.log("statusCode: ", res.statusCode);
           //console.log("headers: ", res.headers);
